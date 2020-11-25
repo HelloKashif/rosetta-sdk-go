@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"sync"
 
 	"github.com/coinbase/rosetta-sdk-go/asserter"
 	"github.com/coinbase/rosetta-sdk-go/parser"
@@ -33,15 +34,27 @@ var _ BlockWorker = (*BalanceStorage)(nil)
 
 const (
 	// accountNamespace is prepended to any stored account.
-	accountNamespace = "account"
+	accountNamespace = "acc"
+
+	// balanceNamespace is prepended to any stored balance.
+	balanceNamespace = "bal"
 
 	// historicalBalanceNamespace is prepended to any stored
 	// historical balance.
-	historicalBalanceNamespace = "balance"
+	historicalBalanceNamespace = "hbal"
+
+	// reconciliationNamespace is prepended to any stored
+	// reconciliation.
+	reconciliationNamepace = "recacc"
+
+	// pruneNamespace is prepended to any stored pruning
+	// record.
+	pruneNamespace = "pruneacc"
 )
 
 var (
 	errAccountFound = errors.New("account found")
+	errTooManyKeys  = errors.New("too many keys")
 )
 
 /*
@@ -49,9 +62,13 @@ var (
 */
 
 // GetAccountKey returns a deterministic hash of a types.Account + types.Currency.
-func GetAccountKey(account *types.AccountIdentifier, currency *types.Currency) []byte {
+func GetAccountKey(
+	namespace string,
+	account *types.AccountIdentifier,
+	currency *types.Currency,
+) []byte {
 	return []byte(
-		fmt.Sprintf("%s/%s/%s", accountNamespace, types.Hash(account), types.Hash(currency)),
+		fmt.Sprintf("%s/%s/%s", namespace, types.Hash(account), types.Hash(currency)),
 	)
 }
 
@@ -90,6 +107,9 @@ func GetHistoricalBalancePrefix(account *types.AccountIdentifier, currency *type
 type BalanceStorageHandler interface {
 	BlockAdded(ctx context.Context, block *types.Block, changes []*parser.BalanceChange) error
 	BlockRemoved(ctx context.Context, block *types.Block, changes []*parser.BalanceChange) error
+
+	NewAccountReconciled(ctx context.Context, dbTx DatabaseTransaction) error
+	NewAccountSeen(ctx context.Context, dbTx DatabaseTransaction) error
 }
 
 // BalanceStorageHelper functions are used by BalanceStorage to process balances. Defining an
@@ -106,6 +126,9 @@ type BalanceStorageHelper interface {
 	ExemptFunc() parser.ExemptOperation
 	BalanceExemptions() []*types.BalanceExemption
 	Asserter() *asserter.Asserter
+
+	AccountsSeen(ctx context.Context, dbTx DatabaseTransaction) (*big.Int, error)
+	AccountsReconciled(ctx context.Context, dbTx DatabaseTransaction) (*big.Int, error)
 }
 
 // BalanceStorage implements block specific storage methods
@@ -114,6 +137,12 @@ type BalanceStorage struct {
 	db      Database
 	helper  BalanceStorageHelper
 	handler BalanceStorageHandler
+
+	// To scale up write concurrency on reconciliation,
+	// we don't update the global reconciliation counter
+	// in the account-scoped reconciliatiion transaction.
+	pendingReconciliations     int
+	pendingReconciliationMutex sync.Mutex
 
 	parser *parser.Parser
 }
@@ -211,10 +240,8 @@ func (b *BalanceStorage) RemovingBlock(
 }
 
 type accountEntry struct {
-	Account        *types.AccountIdentifier `json:"account"`
-	Currency       *types.Currency          `json:"currency"`
-	LastReconciled *types.BlockIdentifier   `json:"last_reconciled"`
-	LastPruned     *int64                   `json:"last_pruned"`
+	Account  *types.AccountIdentifier `json:"account"`
+	Currency *types.Currency          `json:"currency"`
 }
 
 // SetBalance allows a client to set the balance of an account in a database
@@ -239,7 +266,8 @@ func (b *BalanceStorage) SetBalance(
 		return err
 	}
 
-	serialAcc, err := b.db.Encoder().Encode(historicalBalanceNamespace, accountEntry{
+	// Serialize account entry
+	serialAcc, err := b.db.Encoder().Encode(accountNamespace, accountEntry{
 		Account:  account,
 		Currency: amount.Currency,
 	})
@@ -247,15 +275,22 @@ func (b *BalanceStorage) SetBalance(
 		return err
 	}
 
-	// Set current record
-	key := GetAccountKey(account, amount.Currency)
+	// Set account
+	key := GetAccountKey(accountNamespace, account, amount.Currency)
 	if err := dbTransaction.Set(ctx, key, serialAcc, true); err != nil {
 		return err
 	}
 
-	// Set historical record
+	// Set current balance
+	key = GetAccountKey(balanceNamespace, account, amount.Currency)
+	valueBytes := []byte(amount.Value)
+	if err := dbTransaction.Set(ctx, key, valueBytes, false); err != nil {
+		return err
+	}
+
+	// Set historical balance
 	key = GetHistoricalBalanceKey(account, amount.Currency, block.Index)
-	if err := dbTransaction.Set(ctx, key, []byte(amount.Value), true); err != nil {
+	if err := dbTransaction.Set(ctx, key, valueBytes, true); err != nil {
 		return err
 	}
 
@@ -271,28 +306,29 @@ func (b *BalanceStorage) Reconciled(
 	currency *types.Currency,
 	block *types.BlockIdentifier,
 ) error {
+	// TODO: use scoped tx
 	dbTx := b.db.Transaction(ctx)
 	defer dbTx.Discard(ctx)
 
-	err := b.updateAccountEntry(
-		ctx,
-		dbTx,
-		account,
-		currency,
-		func(accEntry accountEntry) *accountEntry {
-			// Don't update last reconciled if the most recent reconciliation was
-			// lower than the last reconciliation. This can occur when inactive
-			// reconciliation gets ahead of the active reconciliation backlog.
-			if accEntry.LastReconciled != nil && accEntry.LastReconciled.Index > block.Index {
-				return nil
-			}
-
-			accEntry.LastReconciled = block
-
-			return &accEntry
-		},
-	)
+	key := GetAccountKey(reconciliationNamepace, account, currency)
+	exists, lastReconciled, err := BigIntGet(ctx, key, dbTx)
 	if err != nil {
+		return err
+	}
+
+	if exists {
+		// Skip update if we already reconciled the account
+		// after the index.
+		if block.Index <= lastReconciled.Int64() {
+			return nil
+		}
+	} else {
+		b.pendingReconciliationMutex.Lock()
+		b.pendingReconciliations++
+		b.pendingReconciliationMutex.Unlock()
+	}
+
+	if err := dbTx.Set(ctx, key, new(big.Int).Add(lastReconciled, big.NewInt(1)).Bytes(), true); err != nil {
 		return err
 	}
 
@@ -303,6 +339,23 @@ func (b *BalanceStorage) Reconciled(
 	return nil
 }
 
+func (b *BalanceStorage) EstimatedReconciliationCoverage(ctx context.Context) (float64, error) {
+	dbTx := b.db.ReadTransaction(ctx)
+	defer dbTx.Discard(ctx)
+
+	reconciled, err := b.helper.AccountsReconciled(ctx, dbTx)
+	if err != nil {
+		return -1, err
+	}
+
+	accounts, err := b.helper.AccountsSeen(ctx, dbTx)
+	if err != nil {
+		return -1, err
+	}
+
+	return float64(reconciled.Int64()) / float64(accounts.Int64()), nil
+}
+
 // ReconciliationCoverage returns the proportion of accounts [0.0, 1.0] that
 // have been reconciled at an index >= to a minimumIndex.
 func (b *BalanceStorage) ReconciliationCoverage(
@@ -311,15 +364,25 @@ func (b *BalanceStorage) ReconciliationCoverage(
 ) (float64, error) {
 	seen := 0
 	validCoverage := 0
-	err := b.getAllAccountEntries(ctx, func(entry accountEntry) {
+	err := b.getAllAccountEntries(ctx, func(txn DatabaseTransaction, entry accountEntry) error {
 		seen++
-		if entry.LastReconciled == nil {
-			return
+
+		// Fetch last reconciliation index in same DatabaseTransaction
+		key := GetAccountKey(reconciliationNamepace, entry.Account, entry.Currency)
+		exists, lastReconciled, err := BigIntGet(ctx, key, txn)
+		if err != nil {
+			return err
 		}
 
-		if entry.LastReconciled.Index >= minimumIndex {
+		if !exists {
+			return nil
+		}
+
+		if lastReconciled.Int64() >= minimumIndex {
 			validCoverage++
 		}
+
+		return nil
 	})
 	if err != nil {
 		return -1, fmt.Errorf("%w: unable to get all account entries", err)
@@ -879,7 +942,7 @@ func (b *BalanceStorage) BootstrapBalances(
 
 func (b *BalanceStorage) getAllAccountEntries(
 	ctx context.Context,
-	handler func(accountEntry),
+	handler func(DatabaseTransaction, accountEntry) error,
 ) error {
 	txn := b.db.ReadTransaction(ctx)
 	defer txn.Discard(ctx)
@@ -899,9 +962,7 @@ func (b *BalanceStorage) getAllAccountEntries(
 				)
 			}
 
-			handler(accEntry)
-
-			return nil
+			return handler(txn, accEntry)
 		},
 		false,
 		false,

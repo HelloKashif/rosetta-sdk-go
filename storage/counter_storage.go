@@ -109,21 +109,21 @@ func getCounterKey(counter string) []byte {
 	return []byte(fmt.Sprintf("%s/%s", counterNamespace, counter))
 }
 
-func transactionalGet(
+func BigIntGet(
 	ctx context.Context,
-	counter string,
+	key []byte,
 	txn DatabaseTransaction,
-) (*big.Int, error) {
-	exists, val, err := txn.Get(ctx, getCounterKey(counter))
+) (bool, *big.Int, error) {
+	exists, val, err := txn.Get(ctx, key)
 	if err != nil {
-		return nil, err
+		return false, nil, err
 	}
 
 	if !exists {
-		return big.NewInt(0), nil
+		return false, big.NewInt(0), nil
 	}
 
-	return new(big.Int).SetBytes(val), nil
+	return true, new(big.Int).SetBytes(val), nil
 }
 
 // UpdateTransactional updates the value of a counter by amount and returns the new
@@ -140,7 +140,7 @@ func (c *CounterStorage) UpdateTransactional(
 	c.m.Lock(counter, false)
 	defer c.m.Unlock(counter)
 
-	val, err := transactionalGet(ctx, counter, dbTx)
+	_, val, err := BigIntGet(ctx, getCounterKey(counter), dbTx)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +180,8 @@ func (c *CounterStorage) Get(ctx context.Context, counter string) (*big.Int, err
 	transaction := c.db.ReadTransaction(ctx)
 	defer transaction.Discard(ctx)
 
-	return transactionalGet(ctx, counter, transaction)
+	_, value, err := BigIntGet(ctx, getCounterKey(counter), transaction)
+	return value, err
 }
 
 // AddingBlock is called by BlockStorage when adding a block.
