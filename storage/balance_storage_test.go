@@ -247,7 +247,7 @@ func TestBalance(t *testing.T) {
 	t.Run("Set and get balance with storage helper", func(t *testing.T) {
 		mockHelper.AccountBalanceAmount = "10"
 		txn := storage.db.Transaction(ctx)
-		err := storage.UpdateBalance(
+		newAccount, err := storage.UpdateBalance(
 			ctx,
 			txn,
 			&parser.BalanceChange{
@@ -258,6 +258,7 @@ func TestBalance(t *testing.T) {
 			},
 			nil,
 		)
+		assert.True(t, newAccount)
 		assert.NoError(t, err)
 		assert.NoError(t, txn.Commit(ctx))
 
@@ -270,7 +271,7 @@ func TestBalance(t *testing.T) {
 
 	t.Run("Set balance with nil currency", func(t *testing.T) {
 		txn := storage.db.Transaction(ctx)
-		err := storage.UpdateBalance(
+		newAccount, err := storage.UpdateBalance(
 			ctx,
 			txn,
 			&parser.BalanceChange{
@@ -281,6 +282,7 @@ func TestBalance(t *testing.T) {
 			},
 			nil,
 		)
+		assert.False(t, newAccount)
 		assert.EqualError(t, err, "invalid currency")
 		txn.Discard(ctx)
 
@@ -291,7 +293,7 @@ func TestBalance(t *testing.T) {
 
 	t.Run("Modify existing balance", func(t *testing.T) {
 		txn := storage.db.Transaction(ctx)
-		err = storage.UpdateBalance(
+		newAccount, err := storage.UpdateBalance(
 			ctx,
 			txn,
 			&parser.BalanceChange{
@@ -302,6 +304,7 @@ func TestBalance(t *testing.T) {
 			},
 			nil,
 		)
+		assert.False(t, newAccount)
 		assert.NoError(t, err)
 		assert.NoError(t, txn.Commit(ctx))
 
@@ -312,7 +315,7 @@ func TestBalance(t *testing.T) {
 
 	t.Run("Discard transaction", func(t *testing.T) {
 		txn := storage.db.Transaction(ctx)
-		err := storage.UpdateBalance(
+		newAccount, err := storage.UpdateBalance(
 			ctx,
 			txn,
 			&parser.BalanceChange{
@@ -323,6 +326,7 @@ func TestBalance(t *testing.T) {
 			},
 			nil,
 		)
+		assert.False(t, newAccount)
 		assert.NoError(t, err)
 
 		// Get balance during transaction
@@ -343,7 +347,7 @@ func TestBalance(t *testing.T) {
 
 	t.Run("Attempt modification to push balance negative on existing account", func(t *testing.T) {
 		txn := storage.db.Transaction(ctx)
-		err := storage.UpdateBalance(
+		newAccount, err := storage.UpdateBalance(
 			ctx,
 			txn,
 			&parser.BalanceChange{
@@ -354,13 +358,14 @@ func TestBalance(t *testing.T) {
 			},
 			nil,
 		)
+		assert.False(t, newAccount)
 		assert.True(t, errors.Is(err, ErrNegativeBalance))
 		txn.Discard(ctx)
 	})
 
 	t.Run("Attempt modification to push balance negative on new acct", func(t *testing.T) {
 		txn := storage.db.Transaction(ctx)
-		err := storage.UpdateBalance(
+		newAccount, err := storage.UpdateBalance(
 			ctx,
 			txn,
 			&parser.BalanceChange{
@@ -371,6 +376,7 @@ func TestBalance(t *testing.T) {
 			},
 			nil,
 		)
+		assert.False(t, newAccount)
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, ErrNegativeBalance))
 		txn.Discard(ctx)
@@ -378,7 +384,7 @@ func TestBalance(t *testing.T) {
 
 	t.Run("sub account set and get balance", func(t *testing.T) {
 		txn := storage.db.Transaction(ctx)
-		err := storage.UpdateBalance(
+		newAccount, err := storage.UpdateBalance(
 			ctx,
 			txn,
 			&parser.BalanceChange{
@@ -389,6 +395,7 @@ func TestBalance(t *testing.T) {
 			},
 			nil,
 		)
+		assert.True(t, newAccount)
 		assert.NoError(t, err)
 		assert.NoError(t, txn.Commit(ctx))
 
@@ -404,7 +411,7 @@ func TestBalance(t *testing.T) {
 
 	t.Run("sub account metadata set and get balance", func(t *testing.T) {
 		txn := storage.db.Transaction(ctx)
-		err := storage.UpdateBalance(
+		newAccount, err := storage.UpdateBalance(
 			ctx,
 			txn,
 			&parser.BalanceChange{
@@ -415,6 +422,7 @@ func TestBalance(t *testing.T) {
 			},
 			nil,
 		)
+		assert.True(t, newAccount)
 		assert.NoError(t, err)
 		assert.NoError(t, txn.Commit(ctx))
 
@@ -430,7 +438,7 @@ func TestBalance(t *testing.T) {
 
 	t.Run("sub account unique metadata set and get balance", func(t *testing.T) {
 		txn := storage.db.Transaction(ctx)
-		err := storage.UpdateBalance(
+		newAccount, err := storage.UpdateBalance(
 			ctx,
 			txn,
 			&parser.BalanceChange{
@@ -441,6 +449,7 @@ func TestBalance(t *testing.T) {
 			},
 			nil,
 		)
+		assert.True(t, newAccount)
 		assert.NoError(t, err)
 		assert.NoError(t, txn.Commit(ctx))
 
@@ -472,7 +481,7 @@ func TestBalance(t *testing.T) {
 		// Successful (balance > computed and negative intermediate value)
 		mockHelper.AccountBalanceAmount = "150"
 		txn = storage.db.Transaction(ctx)
-		err = storage.UpdateBalance(
+		newAccount, err := storage.UpdateBalance(
 			ctx,
 			txn,
 			&parser.BalanceChange{
@@ -483,6 +492,7 @@ func TestBalance(t *testing.T) {
 			},
 			nil,
 		)
+		assert.False(t, newAccount)
 		assert.NoError(t, err)
 		assert.NoError(t, txn.Commit(ctx))
 
@@ -498,7 +508,7 @@ func TestBalance(t *testing.T) {
 		// Successful (balance == computed)
 		mockHelper.AccountBalanceAmount = "200"
 		txn = storage.db.Transaction(ctx)
-		err = storage.UpdateBalance(
+		newAccount, err = storage.UpdateBalance(
 			ctx,
 			txn,
 			&parser.BalanceChange{
@@ -509,6 +519,7 @@ func TestBalance(t *testing.T) {
 			},
 			nil,
 		)
+		assert.False(t, newAccount)
 		assert.NoError(t, err)
 		assert.NoError(t, txn.Commit(ctx))
 
@@ -524,7 +535,7 @@ func TestBalance(t *testing.T) {
 		// Unsuccessful (balance < computed)
 		mockHelper.AccountBalanceAmount = "10"
 		txn = storage.db.Transaction(ctx)
-		err = storage.UpdateBalance(
+		newAccount, err = storage.UpdateBalance(
 			ctx,
 			txn,
 			&parser.BalanceChange{
@@ -535,6 +546,7 @@ func TestBalance(t *testing.T) {
 			},
 			nil,
 		)
+		assert.False(t, newAccount)
 		assert.Error(t, err)
 		txn.Discard(ctx)
 
@@ -631,7 +643,7 @@ func TestBalance(t *testing.T) {
 	t.Run("update existing balance", func(t *testing.T) {
 		txn := storage.db.Transaction(ctx)
 		orphanValue, _ := new(big.Int).SetString(largeDeduction.Value, 10)
-		err := storage.UpdateBalance(
+		newAccount, err := storage.UpdateBalance(
 			ctx,
 			txn,
 			&parser.BalanceChange{
@@ -642,6 +654,7 @@ func TestBalance(t *testing.T) {
 			},
 			nil,
 		)
+		assert.False(t, newAccount)
 		assert.NoError(t, err)
 		retrievedAmount, err := storage.GetBalanceTransactional(
 			ctx,
@@ -684,13 +697,16 @@ func TestBalance(t *testing.T) {
 		}, retrievedAmount)
 
 		txn := storage.db.Transaction(ctx)
-		err = storage.OrphanBalance(
+		shouldRemove, err := storage.OrphanBalance(
 			ctx,
 			txn,
-			account,
-			largeDeduction.Currency,
-			newBlock2,
+			&parser.BalanceChange{
+				Account:  account,
+				Currency: largeDeduction.Currency,
+				Block:    newBlock2,
+			},
 		)
+		assert.True(t, shouldRemove)
 		assert.NoError(t, err)
 		assert.NoError(t, txn.Commit(ctx))
 
@@ -939,7 +955,7 @@ func TestBootstrapBalances(t *testing.T) {
 
 		// Attempt to update balance
 		txn := storage.db.Transaction(ctx)
-		err = storage.UpdateBalance(
+		newAccount, err := storage.UpdateBalance(
 			ctx,
 			txn,
 			&parser.BalanceChange{
@@ -950,6 +966,7 @@ func TestBootstrapBalances(t *testing.T) {
 			},
 			newBlock,
 		)
+		assert.False(t, newAccount)
 		assert.NoError(t, err)
 		assert.NoError(t, txn.Commit(ctx))
 
@@ -1106,7 +1123,7 @@ func TestBalanceReconciliation(t *testing.T) {
 
 	t.Run("set balance", func(t *testing.T) {
 		txn := storage.db.Transaction(ctx)
-		err := storage.UpdateBalance(
+		newAccount, err := storage.UpdateBalance(
 			ctx,
 			txn,
 			&parser.BalanceChange{
@@ -1117,6 +1134,7 @@ func TestBalanceReconciliation(t *testing.T) {
 			},
 			genesisBlock,
 		)
+		assert.True(t, newAccount)
 		assert.NoError(t, err)
 		assert.NoError(t, txn.Commit(ctx))
 
@@ -1130,7 +1148,7 @@ func TestBalanceReconciliation(t *testing.T) {
 		assert.NoError(t, err)
 
 		txn := storage.db.Transaction(ctx)
-		err = storage.UpdateBalance(
+		newAccount, err := storage.UpdateBalance(
 			ctx,
 			txn,
 			&parser.BalanceChange{
@@ -1141,6 +1159,7 @@ func TestBalanceReconciliation(t *testing.T) {
 			},
 			genesisBlock,
 		)
+		assert.True(t, newAccount)
 		assert.NoError(t, err)
 		assert.NoError(t, txn.Commit(ctx))
 
@@ -1182,7 +1201,7 @@ func TestBalanceReconciliation(t *testing.T) {
 
 	t.Run("add unreconciled", func(t *testing.T) {
 		txn := storage.db.Transaction(ctx)
-		err = storage.UpdateBalance(
+		newAccount, err := storage.UpdateBalance(
 			ctx,
 			txn,
 			&parser.BalanceChange{
@@ -1193,9 +1212,11 @@ func TestBalanceReconciliation(t *testing.T) {
 			},
 			newBlock,
 		)
+		assert.True(t, newAccount)
 		assert.NoError(t, err)
 		assert.NoError(t, txn.Commit(ctx))
 
+		// TODO: test estimated
 		coverage, err := storage.ReconciliationCoverage(ctx, 1)
 		assert.NoError(t, err)
 		assert.Equal(t, float64(1)/float64(3), coverage)
@@ -1590,6 +1611,8 @@ type MockBalanceStorageHelper struct {
 	AccountBalances      map[string]string
 	ExemptAccounts       []*types.AccountCurrency
 	BalExemptions        []*types.BalanceExemption
+	AccSeen              *big.Int
+	AccReconciled        *big.Int
 }
 
 func (h *MockBalanceStorageHelper) AccountBalance(
@@ -1658,4 +1681,12 @@ func (h *MockBalanceStorageHelper) ExemptFunc() parser.ExemptOperation {
 
 func (h *MockBalanceStorageHelper) BalanceExemptions() []*types.BalanceExemption {
 	return h.BalExemptions
+}
+
+func (h *MockBalanceStorageHelper) AccountsSeen(ctx context.Context, dbTx DatabaseTransaction) (*big.Int, error) {
+	return h.AccSeen, nil
+}
+
+func (h *MockBalanceStorageHelper) AccountsReconciled(ctx context.Context, dbTx DatabaseTransaction) (*big.Int, error) {
+	return h.AccReconciled, nil
 }
