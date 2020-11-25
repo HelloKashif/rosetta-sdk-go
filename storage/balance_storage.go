@@ -339,6 +339,21 @@ func (b *BalanceStorage) SetBalance(
 		return err
 	}
 
+	// Remove all account keys
+	if err := b.deleteAccountRecords(
+		ctx,
+		dbTransaction,
+		account,
+		amount.Currency,
+	); err != nil {
+		return err
+	}
+
+	// Mark as new account seen
+	if err := b.handler.NewAccountsSeen(ctx, dbTransaction, 1); err != nil {
+		return err
+	}
+
 	// Serialize account entry
 	serialAcc, err := b.db.Encoder().Encode(accountNamespace, accountEntry{
 		Account:  account,
@@ -1035,8 +1050,7 @@ func (b *BalanceStorage) BootstrapBalances(
 		}
 	}
 
-	err := dbTransaction.Commit(ctx)
-	if err != nil {
+	if err := dbTransaction.Commit(ctx); err != nil {
 		return err
 	}
 
