@@ -108,8 +108,8 @@ type BalanceStorageHandler interface {
 	BlockAdded(ctx context.Context, block *types.Block, changes []*parser.BalanceChange) error
 	BlockRemoved(ctx context.Context, block *types.Block, changes []*parser.BalanceChange) error
 
-	NewAccountReconciled(ctx context.Context, dbTx DatabaseTransaction) error
-	NewAccountSeen(ctx context.Context, dbTx DatabaseTransaction) error
+	NewAccountsReconciled(ctx context.Context, dbTx DatabaseTransaction, count int) error
+	NewAccountsSeen(ctx context.Context, dbTx DatabaseTransaction, count int) error
 }
 
 // BalanceStorageHelper functions are used by BalanceStorage to process balances. Defining an
@@ -142,7 +142,7 @@ type BalanceStorage struct {
 	// we don't update the global reconciliation counter
 	// in the account-scoped reconciliatiion transaction.
 	pendingReconciliations     int
-	pendingReconciliationMutex sync.Mutex
+	pendingReconciliationMutex *utils.PriorityMutex
 
 	parser *parser.Parser
 }
@@ -152,7 +152,8 @@ func NewBalanceStorage(
 	db Database,
 ) *BalanceStorage {
 	return &BalanceStorage{
-		db: db,
+		db:                         db,
+		pendingReconciliationMutex: new(utils.PriorityMutex),
 	}
 }
 
@@ -197,6 +198,16 @@ func (b *BalanceStorage) AddingBlock(
 		return nil, err
 	}
 
+	var pending int
+	b.pendingReconciliationMutex.Lock(true)
+	pending = b.pendingReconciliations
+	b.pendingReconciliations = 0
+	b.pendingReconciliationMutex.Unlock()
+
+	if err := b.handler.NewAccountsReconciled(ctx, transaction, pending); err != nil {
+		return nil, err
+	}
+
 	return func(ctx context.Context) error {
 		return b.handler.BlockAdded(ctx, block, changes)
 	}, nil
@@ -213,6 +224,11 @@ func (b *BalanceStorage) RemovingBlock(
 		return nil, fmt.Errorf("%w: unable to calculate balance changes", err)
 	}
 
+	// staleAccounts should be removed because the orphaned
+	// balance was the last stored balance.
+	staleAccounts := []*types.AccountCurrency{}
+	var staleAccountsMutex sync.Mutex
+
 	g, gctx := errgroup.WithContext(ctx)
 	for i := range changes {
 		// We need to set variable before calling goroutine
@@ -220,13 +236,27 @@ func (b *BalanceStorage) RemovingBlock(
 		// continues.
 		change := changes[i]
 		g.Go(func() error {
-			return b.OrphanBalance(
+			shouldRemove, err := b.OrphanBalance(
 				gctx,
 				transaction,
-				change.Account,
-				change.Currency,
-				block.BlockIdentifier,
+				change,
 			)
+			if err != nil {
+				return err
+			}
+
+			if !shouldRemove {
+				return nil
+			}
+
+			staleAccountsMutex.Lock()
+			staleAccounts = append(staleAccounts, &types.AccountCurrency{
+				Account:  change.Account,
+				Currency: change.Currency,
+			})
+			staleAccountsMutex.Unlock()
+
+			return nil
 		})
 	}
 
@@ -235,7 +265,23 @@ func (b *BalanceStorage) RemovingBlock(
 	}
 
 	return func(ctx context.Context) error {
-		return b.handler.BlockRemoved(ctx, block, changes)
+		if err := b.handler.BlockRemoved(ctx, block, changes); err != nil {
+			return err
+		}
+
+		if len(staleAccounts) == 0 {
+			return nil
+		}
+
+		dbTx := b.db.Transaction(ctx)
+		defer dbTx.Discard(ctx)
+		for _, account := range staleAccounts {
+			if err := b.deleteAccountRecords(ctx, dbTx, account.Account, account.Currency); err != nil {
+				return err
+			}
+		}
+
+		return dbTx.Commit(ctx)
 	}, nil
 }
 
@@ -323,7 +369,7 @@ func (b *BalanceStorage) Reconciled(
 			return nil
 		}
 	} else {
-		b.pendingReconciliationMutex.Lock()
+		b.pendingReconciliationMutex.Lock(false)
 		b.pendingReconciliations++
 		b.pendingReconciliationMutex.Unlock()
 	}
@@ -507,26 +553,49 @@ func (b *BalanceStorage) applyExemptions(
 	return liveAmount.Value, nil
 }
 
+// deleteAccountRecords is a convenience method that deletes
+// all traces of an account. This method should be called
+// within a global write transaction as it could contend with
+// other DatabaseTransactions.
+func (b *BalanceStorage) deleteAccountRecords(
+	ctx context.Context,
+	dbTx DatabaseTransaction,
+	account *types.AccountIdentifier,
+	currency *types.Currency,
+) error {
+	for _, namespace := range []string{
+		accountNamespace,
+		reconciliationNamepace,
+		pruneNamespace,
+		balanceNamespace,
+	} {
+		key := GetAccountKey(namespace, account, currency)
+		if err := dbTx.Delete(ctx, key); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // OrphanBalance removes all saved
 // states for a *types.Account and *types.Currency
 // at blocks >= the provided block.
 func (b *BalanceStorage) OrphanBalance(
 	ctx context.Context,
 	dbTransaction DatabaseTransaction,
-	account *types.AccountIdentifier,
-	currency *types.Currency,
-	block *types.BlockIdentifier,
-) error {
+	change *parser.BalanceChange,
+) (bool, error) {
 	err := b.removeHistoricalBalances(
 		ctx,
 		dbTransaction,
-		account,
-		currency,
-		block.Index,
+		change.Account,
+		change.Currency,
+		change.Block.Index,
 		true,
 	)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// Check if we should remove the account record
@@ -534,19 +603,34 @@ func (b *BalanceStorage) OrphanBalance(
 	_, err = b.getHistoricalBalance(
 		ctx,
 		dbTransaction,
-		account,
-		currency,
-		block.Index,
+		change.Account,
+		change.Currency,
+		change.Block.Index,
 	)
 	switch {
 	case errors.Is(err, ErrAccountMissing):
-		key := GetAccountKey(account, currency)
-		return dbTransaction.Delete(ctx, key)
+		return true, nil
 	case err != nil:
-		return err
-	default:
-		return nil
+		return false, err
 	}
+
+	// Update current balance
+	key := GetAccountKey(balanceNamespace, change.Account, change.Currency)
+	exists, lastBalance, err := BigIntGet(ctx, key, dbTransaction)
+	if !exists {
+		return false, ErrAccountMissing
+	}
+
+	difference, ok := new(big.Int).SetString(change.Difference, 10)
+	if !ok {
+		return false, ErrInvalidChangeValue
+	}
+	newBalance := new(big.Int).Add(lastBalance, difference)
+	if err := dbTransaction.Set(ctx, key, newBalance.Bytes(), true); err != nil {
+		return false, err
+	}
+
+	return false, nil
 }
 
 // PruneBalances removes all historical balance states
