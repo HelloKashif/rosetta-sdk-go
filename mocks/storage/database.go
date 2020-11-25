@@ -44,13 +44,45 @@ func (_m *Database) Encoder() *storage.Encoder {
 	return r0
 }
 
-// NewDatabaseTransaction provides a mock function with given fields: _a0, _a1
-func (_m *Database) NewDatabaseTransaction(_a0 context.Context, _a1 bool) storage.DatabaseTransaction {
-	ret := _m.Called(_a0, _a1)
+// ReadTransaction provides a mock function with given fields: _a0
+func (_m *Database) ReadTransaction(_a0 context.Context) storage.DatabaseTransaction {
+	ret := _m.Called(_a0)
 
 	var r0 storage.DatabaseTransaction
-	if rf, ok := ret.Get(0).(func(context.Context, bool) storage.DatabaseTransaction); ok {
-		r0 = rf(_a0, _a1)
+	if rf, ok := ret.Get(0).(func(context.Context) storage.DatabaseTransaction); ok {
+		r0 = rf(_a0)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(storage.DatabaseTransaction)
+		}
+	}
+
+	return r0
+}
+
+// Transaction provides a mock function with given fields: _a0
+func (_m *Database) Transaction(_a0 context.Context) storage.DatabaseTransaction {
+	ret := _m.Called(_a0)
+
+	var r0 storage.DatabaseTransaction
+	if rf, ok := ret.Get(0).(func(context.Context) storage.DatabaseTransaction); ok {
+		r0 = rf(_a0)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(storage.DatabaseTransaction)
+		}
+	}
+
+	return r0
+}
+
+// WriteTransaction provides a mock function with given fields: ctx, identifier, priority
+func (_m *Database) WriteTransaction(ctx context.Context, identifier string, priority bool) storage.DatabaseTransaction {
+	ret := _m.Called(ctx, identifier, priority)
+
+	var r0 storage.DatabaseTransaction
+	if rf, ok := ret.Get(0).(func(context.Context, string, bool) storage.DatabaseTransaction); ok {
+		r0 = rf(ctx, identifier, priority)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(storage.DatabaseTransaction)
