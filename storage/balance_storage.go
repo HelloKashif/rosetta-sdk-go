@@ -394,11 +394,10 @@ func (b *BalanceStorage) Reconciled(
 	currency *types.Currency,
 	block *types.BlockIdentifier,
 ) error {
-	// TODO: use scoped tx
-	dbTx := b.db.Transaction(ctx)
+	key := GetAccountKey(reconciliationNamepace, account, currency)
+	dbTx := b.db.WriteTransaction(ctx, string(key), false)
 	defer dbTx.Discard(ctx)
 
-	key := GetAccountKey(reconciliationNamepace, account, currency)
 	exists, lastReconciled, err := BigIntGet(ctx, key, dbTx)
 	if err != nil {
 		return err
@@ -689,7 +688,8 @@ func (b *BalanceStorage) PruneBalances(
 	currency *types.Currency,
 	index int64,
 ) error {
-	dbTx := b.db.Transaction(ctx)
+	key := GetAccountKey(pruneNamespace, account, currency)
+	dbTx := b.db.WriteTransaction(ctx, string(key), false)
 	defer dbTx.Discard(ctx)
 
 	err := b.removeHistoricalBalances(
