@@ -20,6 +20,7 @@ import (
 	"math/big"
 
 	"github.com/coinbase/rosetta-sdk-go/types"
+	"github.com/coinbase/rosetta-sdk-go/utils"
 )
 
 const (
@@ -74,6 +75,12 @@ const (
 	// or the block where an account was updated has been orphaned.
 	SkippedReconciliationsCounter = "skipped_reconciliations"
 
+	// SeenAccounts is the total number of accounts seen.
+	SeenAccounts = "seen_accounts"
+
+	// ReconciledAccounts is the total number of accounts seen.
+	ReconciledAccounts = "reconciled_accounts"
+
 	// counterNamespace is preprended to any counter.
 	counterNamespace = "counter"
 )
@@ -84,6 +91,8 @@ var _ BlockWorker = (*CounterStorage)(nil)
 // on top of a Database and DatabaseTransaction interface.
 type CounterStorage struct {
 	db Database
+
+	m *utils.MutexMap
 }
 
 // NewCounterStorage returns a new CounterStorage.
@@ -92,6 +101,7 @@ func NewCounterStorage(
 ) *CounterStorage {
 	return &CounterStorage{
 		db: db,
+		m:  utils.NewMutexMap(utils.DefaultShards),
 	}
 }
 
@@ -124,6 +134,12 @@ func (c *CounterStorage) UpdateTransactional(
 	counter string,
 	amount *big.Int,
 ) (*big.Int, error) {
+	// Ensure that same counter is not incremented
+	// concurrently. This is necessary because we concurrently
+	// store account balances.
+	c.m.Lock(counter, false)
+	defer c.m.Unlock(counter)
+
 	val, err := transactionalGet(ctx, counter, dbTx)
 	if err != nil {
 		return nil, err
