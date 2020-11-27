@@ -29,8 +29,8 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/coinbase/rosetta-sdk-go/fetcher"
-	"github.com/coinbase/rosetta-sdk-go/types"
+	"github.com/HelloKashif/rosetta-sdk-go/fetcher"
+	"github.com/HelloKashif/rosetta-sdk-go/types"
 
 	"github.com/fatih/color"
 )

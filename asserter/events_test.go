@@ -17,7 +17,7 @@ package asserter
 import (
 	"testing"
 
-	"github.com/coinbase/rosetta-sdk-go/types"
+	"github.com/HelloKashif/rosetta-sdk-go/types"
 
 	"github.com/stretchr/testify/assert"
 )

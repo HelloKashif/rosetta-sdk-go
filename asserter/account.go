@@ -17,7 +17,7 @@ package asserter
 import (
 	"fmt"
 
-	"github.com/coinbase/rosetta-sdk-go/types"
+	"github.com/HelloKashif/rosetta-sdk-go/types"
 )
 
 // ContainsDuplicateCurrency retruns a boolean indicating

@@ -21,8 +21,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/coinbase/rosetta-sdk-go/types"
-	"github.com/coinbase/rosetta-sdk-go/utils"
+	"github.com/HelloKashif/rosetta-sdk-go/types"
+	"github.com/HelloKashif/rosetta-sdk-go/utils"
 
 	"golang.org/x/sync/errgroup"
 )

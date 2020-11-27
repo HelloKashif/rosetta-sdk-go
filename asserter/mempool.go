@@ -15,7 +15,7 @@
 package asserter
 
 import (
-	"github.com/coinbase/rosetta-sdk-go/types"
+	"github.com/HelloKashif/rosetta-sdk-go/types"
 )
 
 // MempoolTransactions returns an error if any

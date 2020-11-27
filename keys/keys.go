@@ -19,8 +19,8 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/coinbase/rosetta-sdk-go/asserter"
-	"github.com/coinbase/rosetta-sdk-go/types"
+	"github.com/HelloKashif/rosetta-sdk-go/asserter"
+	"github.com/HelloKashif/rosetta-sdk-go/types"
 
 	"github.com/btcsuite/btcd/btcec"
 )

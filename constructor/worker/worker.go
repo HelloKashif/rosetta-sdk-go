@@ -26,12 +26,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/coinbase/rosetta-sdk-go/asserter"
-	"github.com/coinbase/rosetta-sdk-go/constructor/job"
-	"github.com/coinbase/rosetta-sdk-go/keys"
-	"github.com/coinbase/rosetta-sdk-go/storage"
-	"github.com/coinbase/rosetta-sdk-go/types"
-	"github.com/coinbase/rosetta-sdk-go/utils"
+	"github.com/HelloKashif/rosetta-sdk-go/asserter"
+	"github.com/HelloKashif/rosetta-sdk-go/constructor/job"
+	"github.com/HelloKashif/rosetta-sdk-go/keys"
+	"github.com/HelloKashif/rosetta-sdk-go/storage"
+	"github.com/HelloKashif/rosetta-sdk-go/types"
+	"github.com/HelloKashif/rosetta-sdk-go/utils"
 
 	"github.com/lucasjones/reggen"
 	"github.com/tidwall/sjson"
